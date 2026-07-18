@@ -1,0 +1,75 @@
+name: Build and release proton-ge-solosaravanan
+
+on:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  metadata:
+    name: Generate release name
+    runs-on: ubuntu-latest
+
+    outputs:
+      release_name: ${{ steps.version.outputs.release_name }}
+
+    steps:
+      - name: Generate version
+        id: version
+        shell: bash
+        run: |
+          RELEASE_NAME="GE-Proton11-SoloSaravanan-${GITHUB_RUN_NUMBER}"
+          echo "release_name=$RELEASE_NAME" >> "$GITHUB_OUTPUT"
+          echo "Building $RELEASE_NAME"
+
+  build:
+    name: Build Proton
+    needs:
+      - metadata
+    uses: ./.github/workflows/_job_build.yml
+    with:
+      name: ${{ needs.metadata.outputs.release_name }}
+
+  release:
+    name: Create GitHub release
+    needs:
+      - metadata
+      - build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Create release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NAME: ${{ needs.metadata.outputs.release_name }}
+        run: |
+          if gh release view "$RELEASE_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $RELEASE_NAME already exists"
+          else
+            gh release create "$RELEASE_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_NAME" \
+              --notes "Automated build from commit $GITHUB_SHA on branch $GITHUB_REF_NAME."
+          fi
+
+  upload:
+    name: Upload release files
+    needs:
+      - metadata
+      - release
+    uses: ./.github/workflows/_job_upload.yml
+    with:
+      version: ${{ needs.metadata.outputs.release_name }}
+      name: ${{ needs.metadata.outputs.release_name }}
+    secrets: inherit
