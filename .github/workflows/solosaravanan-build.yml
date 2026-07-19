@@ -1,10 +1,11 @@
-name: Build and release proton-ge-solosaravanan
+name: Build and release SoloSaravanan Proton
 
 on:
+  workflow_dispatch:
+
   push:
     branches:
       - "**"
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -23,16 +24,47 @@ jobs:
         shell: bash
         run: |
           RELEASE_NAME="GE-Proton11-SoloSaravanan-${GITHUB_RUN_NUMBER}"
-          echo "release_name=$RELEASE_NAME" >> "$GITHUB_OUTPUT"
-          echo "Building $RELEASE_NAME"
+          echo "release_name=${RELEASE_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "Building ${RELEASE_NAME}"
+
+  tag:
+    name: Create build tag
+    needs: metadata
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Create and push build tag
+        shell: bash
+        env:
+          RELEASE_NAME: ${{ needs.metadata.outputs.release_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --tags origin \
+            "refs/tags/${RELEASE_NAME}" >/dev/null 2>&1; then
+            echo "Tag ${RELEASE_NAME} already exists"
+          else
+            git tag -a "${RELEASE_NAME}" "${GITHUB_SHA}" \
+              -m "${RELEASE_NAME}"
+            git push origin "${RELEASE_NAME}"
+          fi
 
   build:
     name: Build Proton
     needs:
       - metadata
+      - tag
     uses: ./.github/workflows/_job_build.yml
     with:
       name: ${{ needs.metadata.outputs.release_name }}
+    secrets: inherit
 
   release:
     name: Create GitHub release
@@ -42,25 +74,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Create release
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_NAME: ${{ needs.metadata.outputs.release_name }}
         run: |
-          if gh release view "$RELEASE_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $RELEASE_NAME already exists"
+          if gh release view "${RELEASE_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${RELEASE_NAME} already exists"
           else
-            gh release create "$RELEASE_NAME" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "$RELEASE_NAME" \
-              --notes "Automated build from commit $GITHUB_SHA on branch $GITHUB_REF_NAME."
+            gh release create "${RELEASE_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --verify-tag \
+              --title "${RELEASE_NAME}" \
+              --generate-notes
           fi
 
   upload:
